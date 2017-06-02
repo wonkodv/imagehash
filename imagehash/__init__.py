@@ -32,32 +32,28 @@ Rotation by 26: 21 Hamming difference
 from __future__ import (absolute_import, division, print_function)
 
 from PIL import Image
+import math
 import numpy
-#import scipy.fftpack
-#import pywt
+
+try:
+	import scipy.fftpack
+except ImportError:
+	pass
+try:
+	import pywt
+except ImportError:
+	pass
+
 import os.path
 __version__ = open(os.path.join(os.path.abspath(
 	os.path.dirname(__file__)), 'VERSION')).read().strip()
 
-def _binary_array_to_hex(arr):
-	"""
-	internal function to make a hex string out of a binary array.
+def _bits(*args):
+	for i in range(*args):
+		yield 1 << i
 
-	binary array might be created from comparison - for example, in 
-	average hash, each pixel in the image is compared with the average pixel value. 
-	If the pixel's value is less than the average it gets a 0 and if it's more it gets a 1.
-	Then we treat this like a string of bits and convert it to hexadecimal.
-	"""
-	h = 0
-	s = []
-	for i, v in enumerate(arr.flatten()):
-		if v: 
-			h += 2**(i % 8)
-		if (i % 8) == 7:
-			s.append(hex(h)[2:].rjust(2, '0'))
-			h = 0
-	return "".join(s)
 
+_not_in_all = set(globals())
 
 class ImageHash(object):
 	"""
@@ -66,8 +62,15 @@ class ImageHash(object):
 	def __init__(self, binary_array):
 		self.hash = binary_array
 
+	def __int__(self):
+		return  sum(
+			1 << (len(self.hash) * y + x)
+				for y,line in enumerate(self.hash)
+					for x,b in enumerate(line)
+						if b)
+
 	def __str__(self):
-		return _binary_array_to_hex(self.hash.flatten())
+		return "{0:0{1:d}X}".format(int(self), self.hash.size // 4)
 
 	def __repr__(self):
 		return repr(self.hash)
@@ -84,32 +87,35 @@ class ImageHash(object):
 			return False
 		return numpy.array_equal(self.hash.flatten(), other.hash.flatten())
 
+	def __xor__(self, other):
+		return self.hash != other.hash
+
 	def __ne__(self, other):
 		if other is None:
 			return False
 		return not numpy.array_equal(self.hash.flatten(), other.hash.flatten())
 
 	def __hash__(self):
-		# this returns a 8 bit integer, intentionally shortening the information
-		return sum([2**(i % 8) for i, v in enumerate(self.hash.flatten()) if v])
+		return int(self)
 
+	@classmethod
+	def from_int(cls, i, size):
+		if i.bit_length() > size * size:
+			raise ValueError("More bits supplied than expected",
+                                i.bit_length(), size*size)
+		return cls(numpy.array([
+			[ i & m != 0 for m in _bits(size * y, size * (y + 1))]
+				for y in range(size) ]))
+
+	@classmethod
+	def from_string(cls, string):
+		size = math.sqrt(len(string)*4)
+		if not size.is_integer():
+			raise ValueError("Non square number of bits in string", len(string)*4)
+		return cls.from_int(int(string, 16), int(size))
 
 def hex_to_hash(hexstr, hash_size=8):
-	"""
-	Convert a stored hash (hex, as retrieved from str(Imagehash))
-	back to a Imagehash object.
-	"""
-	l = []
-	count = hash_size * (hash_size // 4)
-	if len(hexstr) != count:
-		emsg = 'Expected hex string size of {}.'
-		raise ValueError(emsg.format(count))
-	for i in range(count // 2):
-		h = hexstr[i*2:i*2+2]
-		v = int("0x" + h, 16)
-		l.append([v & 2**i > 0 for i in range(8)])
-	return ImageHash(numpy.array(l))
-
+    return ImageHash.from_string(hexstr)
 
 def average_hash(image, hash_size=8):
 	"""
@@ -266,3 +272,4 @@ def whash(image, hash_size = 8, image_scale = None, mode = 'haar', remove_max_ha
 	diff = dwt_low > med
 	return ImageHash(diff)
 
+__all__ = tuple(set(globals()) - _not_in_all )
