@@ -63,9 +63,10 @@ class ImageHash(object):
 		self.hash = binary_array
 
 	def __int__(self):
+		# MSB is top right corner for compatibillity reasons
 		return  sum(
 			1 << (len(self.hash) * y + x)
-				for y,line in enumerate(self.hash)
+				for y,line in enumerate(reversed(self.hash))
 					for x,b in enumerate(line)
 						if b)
 
